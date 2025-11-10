@@ -13,6 +13,7 @@ char log_buffer[1024];
 
 
 #define RAYLIB_ENABLED 1
+const char screenshot_path[] = "screenshots/take_2/";
 
 Color green = {175, 200, 100, 255};
 Color darkgreen = {45, 50, 20, 255};
@@ -21,20 +22,27 @@ Color darkgreen = {45, 50, 20, 255};
 
 #define SCREEN_W 1920
 #define SCREEN_H 1040
+#define DEFAULT_NODES 0
+#define USE_RANDOM_WEIGHT 0
+#define ENABLE_SCREEN_CAPTURE 0 
+
 //#define SCREEN_W 125
 //#define SCREEN_H 105
 
 #define SUR_D 20
 
 const int8_t sur_d[SUR_D*2] = {0, -1, -1, 0, 1, 1, 1, 0, -1,  0, 0, 1, 1, 1, 0, -1, -1, -1};
+const double weight_grid[] =  {0, 1, sqrt(2), 1, sqrt(2), 1, sqrt(2), 1, sqrt(2)};
+
 
 Color COL_WHITE         = {255, 255, 255, 255};
 Color COL_GRAY          = {100, 100, 100, 255};
-Color COL_GREEN         = {15,  105, 10,  255};
+Color COL_GREEN         = {15,  165, 10,  255};
 Color COL_BRIGHT_GREEN  = {15,  255, 10,  255};
-Color COL_DARK_GREEN    = {5,    55, 3,   255};
+Color COL_DARK_GREEN    = {5,    85, 3,   255};
 Color COL_RED           = {255, 100, 10,  255};
 Color COL_BLUE          = {10,  100, 255, 255};
+Color COL_MAGENTA       = {120, 10,  200, 255};
 Color COL_BLACK         = {1,   1,   1,   255};
 
 enum col_enum{
@@ -44,10 +52,11 @@ enum col_enum{
     _BLUE,
     _BGREEN,
     _DGREEN,
-    _GRAY
+    _GRAY,
+    _MAGENTA
 };
 
-Color col_array[] = {COL_BLACK, COL_GREEN, COL_RED, COL_BLUE, COL_BRIGHT_GREEN, COL_DARK_GREEN};
+Color col_array[] = {COL_BLACK, COL_GREEN, COL_RED, COL_BLUE, COL_BRIGHT_GREEN, COL_DARK_GREEN, COL_GRAY, COL_MAGENTA};
 
 void xy_to_pos(int* pos, int x, int y, int columns){
     if (x < 0 || x >= columns || y < 0 || y >= columns){
@@ -217,9 +226,12 @@ class Graph{
 
 class Priority_Queue{
     public:
-        Priority_Queue(){}
+        Priority_Queue(){
+            m_setup = false;
+        }
         Priority_Queue(size_t item_count) : m_queue_size(item_count){
             m_arr.reserve(m_queue_size);
+            m_setup = true;
         }
         ~Priority_Queue(){}
 
@@ -230,6 +242,9 @@ class Priority_Queue{
         void setup(size_t item_count){
             m_queue_size = item_count;
             m_arr.reserve(m_queue_size);
+            m_setup = true;
+            sprintf(log_buffer, "Priority_Queue::%s: for %ld items.", __func__, m_queue_size);
+            logger(log_buffer, 4);
         }
 
         void purge() {
@@ -241,9 +256,10 @@ class Priority_Queue{
             return;
         }
 
+
         void insert(int node_index, double node_weight){
             Q_Node qn{node_index, node_weight};
-            m_arr.push_back(qn);
+            m_arr.emplace_back(qn);   //changed push_back to emplace_back
             shift_up(m_arr.size()-1);
         }
         void push(int node_index, double node_weight){
@@ -297,14 +313,32 @@ class Priority_Queue{
                 i = get_p(i);
             }
         }
-        void shift_down(int i){
+
+        void shift_down(size_t i){
+            size_t n = m_arr.size();
+            while (true){
+                size_t min_index = i;
+                size_t left = get_lc(i);
+                size_t right = get_lc(i);
+                if (left < n && m_arr[left].weight < m_arr[min_index].weight) 
+                    min_index = left;
+                if (right < n && m_arr[right].weight < m_arr[min_index].weight) 
+                    min_index = right;
+
+                if (min_index == i) {break; }
+                std::swap(m_arr[i], m_arr[min_index]);
+                i = min_index;
+            }
+        }
+
+        void shift_down_recursive(int i){
             int min_index = i;
-            size_t l = get_lc(i);
-            size_t r = get_rc(i);
-            if (l < m_arr.size() && m_arr[l].weight < m_arr[min_index].weight) 
-                min_index = l;
-            if (r < m_arr.size() && m_arr[r].weight < m_arr[min_index].weight) 
-                min_index = r;
+            size_t left = get_lc(i);
+            size_t right = get_rc(i);
+            if (left < m_arr.size() && m_arr[left].weight < m_arr[min_index].weight) 
+                min_index = left;
+            if (right < m_arr.size() && m_arr[right].weight < m_arr[min_index].weight) 
+                min_index = right;
             if (i != min_index){
                 std::swap(m_arr[i], m_arr[min_index]);
                 shift_down(min_index);
@@ -315,26 +349,24 @@ class Priority_Queue{
 
 #define MAX 99999.9
 
-class Dijkstra{
+class A_Star{
     public:
-        Dijkstra(Graph* graph) : 
-            m_graph(graph)
-            //m_node_count(graph->get_node_count()),
-            //queue(m_node_count)
-        {
-            //m_init();
-        }
-        ~Dijkstra(){
+        A_Star(Graph* graph) : 
+            m_graph(graph) { }
+        ~A_Star(){
             delete[] m_dist;
             delete[] m_prev;
             delete[] m_visited;
         }
 
-        //void setup(){
-        //    m_init();
-        //    sprintf(log_buffer, "Dijkstra::%s: build with %ld nodes.", __func__, m_node_count);
-        //    logger(log_buffer, 4);
-        //}
+        double heuristic(int node_a, int node_b){
+            int xa, ya, xb, yb;
+            int pos_a, pos_b;
+            m_graph->get_node_xy(node_b, &xa, &ya);
+            m_graph->get_node_xy(node_b, &xb, &yb);
+            return abs(xa - xb) + abs(ya - yb);
+        }
+            
 
         int setup_path(size_t source_node, size_t destination_node){
             m_init();
@@ -349,10 +381,11 @@ class Dijkstra{
                 m_dist[con_node] = con_weight;
                 m_prev[con_node] = m_source_node;
             }
+            m_path_exist = -1;
             m_visited[source_node] = 1;
             return 1;
         }
-        // Returns 0 if search in progress, 1 if path is found and 99 if no path exists.
+
         int step_path(int* colour_array){ 
             int return_value = 0;
             int visiting_node, r;
@@ -364,7 +397,6 @@ class Dijkstra{
                     for (const Edge& v_edge : v_edge_list){
                         const size_t v_node = v_edge.get_index();
                         double v_weight = v_edge.get_weight();
-                        queue.push(v_node, v_weight);
                         double pot_weight = m_dist[visiting_node]+v_weight;
                         if (colour_array[visiting_node] == _BLACK){
                             colour_array[visiting_node] = _DGREEN;
@@ -372,6 +404,8 @@ class Dijkstra{
                         if (pot_weight < m_dist[v_node]){
                             m_dist[v_node] = pot_weight;
                             m_prev[v_node] = visiting_node;
+                            double h_weight = pot_weight + heuristic(visiting_node, v_node);
+                            queue.push(v_node, pot_weight + h_weight); //changed v_weight to pot_weight
                         }
                     }
                     m_visited[visiting_node] = 1;
@@ -379,10 +413,11 @@ class Dijkstra{
             }else{
                 sprintf(log_buffer, "%s: Path found.", __func__);
                 logger(log_buffer, 4);
+                return_value = 1;
                 if (m_dist[m_destination_node] < MAX){
-                    return_value = 1;
+                    m_path_exist = 1;
                 }else{
-                    return_value = 99;
+                    m_path_exist = 0;
                 }
 
             }
@@ -392,11 +427,15 @@ class Dijkstra{
         // Returns 0 if marking in progress, 1 if completed.
         int mark_shortest_path(int* colour_array){ 
             int return_value = 1;
+            if (m_path_exist != 1){
+                return return_value;
+            }
             if (m_dist[m_destination_node] < MAX){
                 int* path = new int[m_node_count];
                 size_t v = m_destination_node;
                 int i = 0;
                 while (v!=m_source_node){
+                    //_graph.set_node_colour(v, blue);
                     if (colour_array[v] != _RED){
                         colour_array[v] = _BLUE;
                     }
@@ -420,6 +459,7 @@ class Dijkstra{
         bool* m_visited;
         size_t m_source_node;
         size_t m_destination_node;
+        int m_path_exist;
 
         void m_init(){
             m_node_count = m_graph->get_node_count();
@@ -437,7 +477,128 @@ class Dijkstra{
 
 };
 
+class Dijkstra{
+    public:
+        Dijkstra(Graph* graph) : 
+            m_graph(graph) { }
+        ~Dijkstra(){
+            delete[] m_dist;
+            delete[] m_prev;
+            delete[] m_visited;
+        }
 
+        int setup_path(size_t source_node, size_t destination_node){
+            m_init();
+            m_source_node = source_node;
+            m_destination_node = destination_node;
+            m_dist[m_source_node] = 0;
+            const std::vector<Edge>& edge_list = m_graph->get_node_edges(m_source_node);
+            for (const Edge& edge : edge_list){
+                const size_t con_node = edge.get_index();
+                const double con_weight = edge.get_weight();
+                queue.push(con_node, con_weight);
+                m_dist[con_node] = con_weight;
+                m_prev[con_node] = m_source_node;
+            }
+            m_path_exist = -1;
+            m_visited[source_node] = 1;
+            return 1;
+        }
+
+        int step_path(int* colour_array){ 
+            int return_value = 0;
+            int visiting_node, r;
+            double weight;
+            if (!queue.is_empty()){
+                r = queue.pop(&visiting_node, &weight);
+                if (m_visited[visiting_node] == 0){
+                    const std::vector<Edge>& v_edge_list = m_graph->get_node_edges(visiting_node);
+                    for (const Edge& v_edge : v_edge_list){
+                        const size_t v_node = v_edge.get_index();
+                        double v_weight = v_edge.get_weight();
+                        double pot_weight = m_dist[visiting_node]+v_weight;
+                        if (colour_array[visiting_node] == _BLACK){
+                            colour_array[visiting_node] = _DGREEN;
+                        }
+                        if (pot_weight < m_dist[v_node]){
+                            m_dist[v_node] = pot_weight;
+                            m_prev[v_node] = visiting_node;
+                            queue.push(v_node, pot_weight); //changed v_weight to pot_weight
+                        }
+                    }
+                    m_visited[visiting_node] = 1;
+                }
+            }else{
+                sprintf(log_buffer, "%s: Path found.", __func__);
+                logger(log_buffer, 4);
+                return_value = 1;
+                if (m_dist[m_destination_node] < MAX){
+                    m_path_exist = 1;
+                }else{
+                    m_path_exist = 0;
+                }
+
+            }
+            return return_value;
+        }
+
+        // Returns 0 if marking in progress, 1 if completed.
+        int mark_shortest_path(int* colour_array){ 
+            int return_value = 1;
+            if (m_path_exist != 1){
+                return return_value;
+            }
+            if (m_dist[m_destination_node] < MAX){
+                int* path = new int[m_node_count];
+                size_t v = m_destination_node;
+                int i = 0;
+                while (v!=m_source_node){
+                    //_graph.set_node_colour(v, blue);
+                    if (colour_array[v] != _RED){
+                        colour_array[v] = _BLUE;
+                    }
+                    path[i] = v;
+                    v = m_prev[v];
+                    i++;
+                }
+                path[i] = v;
+                delete[] path;
+            }
+            return return_value;
+        }
+
+
+    private:
+        Graph* m_graph;
+        size_t m_node_count;
+        Priority_Queue queue;
+        double* m_dist;
+        int* m_prev;
+        bool* m_visited;
+        size_t m_source_node;
+        size_t m_destination_node;
+        int m_path_exist;
+
+        void m_init(){
+            m_node_count = m_graph->get_node_count();
+            m_dist = new double[m_node_count];
+            m_prev = new int[m_node_count];
+            m_visited = new bool[m_node_count];
+            queue.setup(m_node_count);
+            queue.purge();
+            for (size_t i = 0; i < m_node_count; ++i) {
+                m_dist[i] = MAX;
+                m_prev[i] = -1;
+                m_visited[i] = false;
+            }
+        }
+
+};
+
+double select_weight(){
+    double weight = 1.0;
+    return weight;
+}
 
 class World{
     public:
@@ -460,8 +621,8 @@ class World{
         for (size_t c=0; c<m_cell_count; c++){
             m_cell_colours[c] = _BLACK;
         }
-        square_green = -1;
-        square_red = -1;
+        m_square_green = -1;
+        m_square_red = -1;
 
 
     }
@@ -486,16 +647,24 @@ class World{
         void set_cell_colour(size_t pos, int colour){
             m_cell_colours[pos] = colour;
             if (colour == _RED){
-                if (square_red != -1){
-                    set_cell_colour(square_red, _BLACK);
+                if (m_square_red != -1){
+                    m_cell_colours[m_square_red] = _BLACK;
                 }
-                square_red = pos;
+                m_square_red = pos;
             }
             if (colour == _GREEN){
-                if (square_green != -1){
-                    set_cell_colour(square_green, _BLACK);
+                if (m_square_green != -1){
+                    m_cell_colours[m_square_green] = _BLACK;
                 }
-                square_green = pos;
+                m_square_green = pos;
+            }
+            if (colour == _BLACK){
+                if (pos == m_square_green){
+                    m_square_green = -1;
+                }
+                if (pos == m_square_red){
+                    m_square_red = -1;
+                }
             }
         }
 
@@ -540,10 +709,10 @@ class World{
                             sprintf(log_buffer, "%s: Node from i: %ld out of bounds: xy:(%d,%d), oxy:(%d,%d), sxy:(%d,%d).", __func__, node, x, y, ox, oy, sx, sy);
                             logger(log_buffer, 2);
                         }else{
-
-                            m_graph.connect(node, n_node, 1);
-                            //sprintf(log_buffer, "%s: n(%d)->n(%d).", __func__, node, n_node);
-                            //logger(log_buffer, 4);
+                            if (get_cell_colour(n_node) != _MAGENTA){
+                                double weight = weight_grid[j] * select_weight();
+                                m_graph.connect(node, n_node, weight_grid[j] * weight);
+                            }
                         }
                     }
                 }
@@ -554,28 +723,51 @@ class World{
             return 1;
         }
 
+        int setup_astar(){
+        //int setup_path(size_t source_node, size_t destination_node){
+            if (m_square_green < 0 || m_square_red < 0){
+                sprintf(log_buffer, "%s: No start or dist m_square selected.", __func__);
+                logger(log_buffer, 2);
+                std::cout<<log_buffer<<'\n';
+            }else{
+                m_astar.setup_path((size_t) m_square_green, (size_t) m_square_red);
+            }
+
+            //sprintf(log_buffer, "%s: completed.", __func__);
+            //logger(log_buffer, 4);
+            return 1;
+        }
+
+        int step_path_astar(){
+            return m_astar.step_path(m_cell_colours);
+        }
+
+        int mark_path_astar(){
+            return m_astar.mark_shortest_path(m_cell_colours);
+        }
+
 
 
         int setup_dijkstra(){
         //int setup_path(size_t source_node, size_t destination_node){
-            if (square_green < 0 || square_red < 0){
-                sprintf(log_buffer, "%s: No start or dist square selected.", __func__);
+            if (m_square_green < 0 || m_square_red < 0){
+                sprintf(log_buffer, "%s: No start or dist m_square selected.", __func__);
                 logger(log_buffer, 2);
                 std::cout<<log_buffer<<'\n';
             }else{
-                m_dijkstra.setup_path((size_t) square_green, (size_t) square_red);
+                m_dijkstra.setup_path((size_t) m_square_green, (size_t) m_square_red);
             }
 
-            sprintf(log_buffer, "%s: completed.", __func__);
-            logger(log_buffer, 4);
+            //sprintf(log_buffer, "%s: completed.", __func__);
+            //logger(log_buffer, 4);
             return 1;
         }
 
-        int step_path(){
+        int step_path_dijkstra(){
             return m_dijkstra.step_path(m_cell_colours);
         }
 
-        int mark_path(){
+        int mark_path_dijkstra(){
             return m_dijkstra.mark_shortest_path(m_cell_colours);
         }
 
@@ -613,10 +805,11 @@ class World{
         size_t m_remainder_h;
         size_t m_cell_count;
         int* m_cell_colours;
-        int square_green;
-        int square_red;
+        int m_square_green;
+        int m_square_red;
         Graph m_graph = Graph(m_cell_size);
         Dijkstra m_dijkstra = Dijkstra(&m_graph);
+        A_Star m_astar = A_Star(&m_graph);
 };
 
 
@@ -635,6 +828,11 @@ void act_on_mouse(int mouse_button, World& world){
         if (IsKeyDown(KEY_G)){
             colour = _GREEN;
         }
+        if (IsKeyDown(KEY_M)){
+            colour = _MAGENTA;
+        }
+    }else{
+        colour = _BLACK;
     }
     int cell_index = world.get_cell_index_from_pos(mouse_x, mouse_y);
     world.set_cell_colour(cell_index, colour);
@@ -645,22 +843,34 @@ void act_on_mouse(int mouse_button, World& world){
 
 World world(SCREEN_H, SCREEN_W, GRID_CELL_SIZE);
 
+void capture_screen(){
+    static size_t capture_count = 0;
+    char file_name[255];
+    sprintf(file_name, "%sscreen_%ld.png", screenshot_path, capture_count);
+    TakeScreenshot(file_name);
+    sprintf(log_buffer, "%s: '%s'.", __func__, file_name);
+    capture_count++;
+    logger(log_buffer, 4);
+}
+    
+
 int main(){
 
     int selector = 0;
-    int (World::*world_actions[6])();
-    world_actions[0] = &World::construct_graph;
-    world_actions[1] = &World::connect_neighbours;
-    world_actions[2] = &World::setup_dijkstra;
-    world_actions[3] = &World::step_path;
-    world_actions[4] = &World::mark_path;
-    world_actions[5] = &World::get_null;
+    int (World::*world_actions[8])();
+    world_actions[0] = &World::get_null;
+    world_actions[1] = &World::construct_graph;
+    world_actions[2] = &World::connect_neighbours;
+    world_actions[3] = &World::setup_astar;
+    world_actions[4] = &World::step_path_astar;
+    world_actions[5] = &World::mark_path_astar;
+    world_actions[6] = &World::get_null;
 
 #if RAYLIB_ENABLED
     //InitWindow(GRID_CELL_SIZE*GRID_CELL_COUNT, GRID_CELL_SIZE*GRID_CELL_COUNT, "window");
     InitWindow(SCREEN_W, SCREEN_H, "Tiles");
     //SetTargetFPS(60);
-
+    ToggleBorderlessWindowed();
     while (WindowShouldClose() == false){
         BeginDrawing();
         if (IsMouseButtonPressed(0)){
@@ -670,30 +880,37 @@ int main(){
             act_on_mouse(1, world);
         }
 
-        if(IsKeyPressed(KEY_ESCAPE)){
+        if(IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_Q)){
             break;
         }
         if (IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_G)){
-            world.setup_dijkstra();
+            //world.setup_dijkstra();
+            if (selector == 0){
+                selector = 1;
+            }
         }
-
-
-        if (IsKeyDown(KEY_LEFT_SHIFT) && IsKeyPressed(KEY_S)){
+        if (DEFAULT_NODES){
+            if (selector == 0){
+                sprintf(log_buffer, "%s: system defined nodes.", __func__);
+                logger(log_buffer, 4);
+                world.set_cell_colour(0, _GREEN);
+                world.set_cell_colour(world.get_cell_count()-1, _RED);
+                world.setup_dijkstra();
+                //selector++;
+            }
         }
-
         selector += (world.*world_actions[selector])();
 
-        if (selector == 1){
-            world.set_cell_colour(0, _GREEN);
-            world.set_cell_colour(world.get_cell_count()-1, _RED);
-        }
-
-
-        if (selector < 6){
+        if (selector < 7){
             ClearBackground(COL_BLACK);
             world.draw_cells();
         }
         EndDrawing();
+        if (selector > 2 && selector <= 6){
+            if (ENABLE_SCREEN_CAPTURE){
+                capture_screen();
+            }
+        }
     }
     CloseWindow();
 #endif //RL ENABLED
