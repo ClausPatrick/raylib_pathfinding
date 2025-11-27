@@ -10,9 +10,9 @@ This is a educational C++ project that implements a pathfinding algorithm visual
     <p align="center">
       <img src="assets/astar.gif" width="640">
     </p>
-- `astar_wall.gif` — Diamoeba (`B35678/S5678`)  
+- `astar_wall.gif` — Astar wall (`B35678/S5678`)  
     <p align="center">
-      <img src="assets/astar_wall" width="640">
+      <img src="assets/astar_wall.gif" width="640">
     </p>
 
 
