@@ -4,6 +4,18 @@
 
 This is a educational C++ project that implements a pathfinding algorithm visualization tool using Raylib. The application allows users to interactively create a grid-based environment and demonstrate Dijkstra's pathfinding algorithm.
 
+## Media
+
+- `astar.gif` — Conway’s Life
+    <p align="center">
+      <img src="assets/astar.gif" width="640">
+    </p>
+- `astar_wall.gif` — Diamoeba (`B35678/S5678`)  
+    <p align="center">
+      <img src="assets/astar_wall" width="640">
+    </p>
+
+
 ## Features
 
 - **Interactive Grid Visualization**: Create a grid of squares using Raylib
